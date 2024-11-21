@@ -3,25 +3,29 @@ from fastapi import UploadFile
 from openai import OpenAI
 import os
 import time
-from dotenv import load_dotenv
 from app.utils.tools import ExtrairPublicacoes
 
 
 class Assistant:
     def __init__(self, nome: str, id: str, tools: list):
-        load_dotenv()
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         self.client = OpenAI()
         self.nome = nome
         self.id = id
-        self.messages = []
+        self.mensagens = []
         self.arquivos = []
         self.tools = tools
+        self.extensoes_audio = {
+            "audio/mpeg": "mp3",
+            "audio/wav": "wav",
+            "audio/x-m4a": "m4a",
+            "audio/m4a": "m4a"
+        }
 
     def adicionar_mensagens(self, mensagens: list, thread_id: str | None):
         for mensagem in mensagens:
             if thread_id is None:
-                self.messages.append(
+                self.mensagens.append(
                     {
                         "role": "user",
                         "content": [
@@ -51,7 +55,7 @@ class Assistant:
     def adicionar_imagens(self, id_imagens: list, thread_id: str | None):
         for imagem in id_imagens:
             if thread_id is None:
-                self.messages.append(
+                self.mensagens.append(
                     {
                         "role": "user",
                         "content": [
@@ -97,6 +101,26 @@ class Assistant:
             id_imagens.append(response.id)
         return id_imagens
 
+    async def transcrever_audio(self, audio: UploadFile, thread_id: str | None):
+        if audio.content_type in self.extensoes_audio:
+            conteudo = await audio.read()
+            audio_bytes = io.BytesIO(conteudo)
+            audio_bytes.seek(0)
+            extensao = self.extensoes_audio[audio.content_type]
+            audio_bytes.name = f'audio.{extensao}'
+
+            try:
+                transcricao = self.client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_bytes
+                )
+
+                return self.adicionar_mensagens([f"**Transcrição**: {transcricao.text}"], thread_id)
+            except Exception as e:
+                raise ValueError(f"Erro ao transcrever áudio: {str(e)}")
+        else:
+            raise ValueError("O arquivo de áudio não é compatível")
+
     def excluir_imagens(self, id_imagens: list):
         for imagem in id_imagens:
             self.client.files.delete(imagem)
@@ -107,24 +131,31 @@ class Assistant:
     async def processar_arquivos(self, thread_id: str | None):
         if len(self.arquivos) > 0:
             for arquivo in self.arquivos:
-                for ferramenta in self.tools:
-                    #ferramenta = tool() TODO: ver casos em que há mais de uma ferramenta
-                    try:
-                        dados = await ferramenta.executar(arquivo)
-                    except:
+                if arquivo.content_type.startswith("audio/"):
+                    await self.transcrever_audio(arquivo, thread_id)
+                else:
+                    for ferramenta in self.tools:
+                        #TODO: ver casos em que há mais de uma ferramenta que aceita o mesmo tipo de arquivo
+                        try:
+                            if await ferramenta.verificar_arquivo(arquivo):
+                                dados = await ferramenta.executar(arquivo, self.client)
+                            else:
+                                break
+                        except:
+                            break
+                        if isinstance(ferramenta, ExtrairPublicacoes):
+                            self.adicionar_mensagens(dados, thread_id)
+                        else:
+                            id_imagens = self.subir_imagens(dados)
+                            self.adicionar_imagens(id_imagens, thread_id)
+                            #TODO: cadastrar arquivos no banco de dados
                         break
-                    if isinstance(ferramenta, ExtrairPublicacoes):
-                        self.adicionar_mensagens(dados, thread_id)
-                    else:
-                        id_imagens = self.subir_imagens(dados)
-                        self.adicionar_imagens(id_imagens, thread_id)
-                    break
 
     def criar_rodar_thread(self):
         run = self.client.beta.threads.create_and_run(
             assistant_id=self.id,
             thread={
-                "messages": self.messages
+                "messages": self.mensagens
             }
         )
 

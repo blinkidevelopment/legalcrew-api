@@ -1,8 +1,7 @@
-import os
-
 from fastapi import FastAPI
 from app.routers import assistente, usuario
 from fastapi.middleware.cors import CORSMiddleware
+import os
 
 
 app = FastAPI()

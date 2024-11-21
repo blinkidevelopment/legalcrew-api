@@ -102,8 +102,12 @@ async def enviar_mensagem(
 
 '''Rota para obter as mensagens de uma thread'''
 @router.get("/thread/{thread_id}")
-async def listar_mensagens(thread_id: str, db: Session = Depends(obter_sessao)):
-    conversa = db.query(Conversa).filter_by(id_thread=thread_id).first() #TODO: checar tbm se a conversa pertence ao usuário logado
+async def listar_mensagens(
+        thread_id: str,
+        db: Session = Depends(obter_sessao),
+        usuario: Usuario = Depends(obter_usuario_logado)
+):
+    conversa = db.query(Conversa).filter_by(id_thread=thread_id, id_usuario=usuario.id).first()
 
     if conversa is not None:
         assistente = Assistant(nome=conversa.assistente.nome, id=conversa.assistente.id, tools=[])
@@ -112,11 +116,16 @@ async def listar_mensagens(thread_id: str, db: Session = Depends(obter_sessao)):
 
 
 @router.get("/thread/{thread_id}/arquivo/{file_id}")
-async def baixar_arquivo(thread_id: str, file_id: str, db: Session = Depends(obter_sessao)):
-    conversa = db.query(Conversa).filter_by(id_thread=thread_id).first() #TODO: checar tbm se a conversa pertence ao usuário logado
+async def baixar_arquivo(
+        thread_id: str,
+        file_id: str,
+        db: Session = Depends(obter_sessao),
+        usuario: Usuario = Depends(obter_usuario_logado)
+):
+    conversa = db.query(Conversa).filter_by(id_thread=thread_id, id_usuario=usuario.id).first()
 
     if conversa is not None:
-        arquivo = db.query(Arquivo).filter(Arquivo.id == file_id, Arquivo.id_conversa == conversa.id).first()
+        arquivo = db.query(Arquivo).filter_by(id=file_id, id_conversa=conversa.id).first()
 
         if arquivo is not None:
             assistente = Assistant(nome=conversa.assistente.nome, id=conversa.assistente.id, tools=[])
