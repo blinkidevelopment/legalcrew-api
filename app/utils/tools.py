@@ -4,7 +4,6 @@ import PyPDF2
 from fastapi import UploadFile
 from PIL import Image
 import fitz
-from openai import OpenAI
 from pdf2image import convert_from_bytes
 
 
@@ -19,7 +18,7 @@ class Tool:
         else:
             return True
 
-    async def executar(self, arquivo: UploadFile, client: OpenAI):
+    async def executar(self, arquivo: UploadFile):
         pass
 
 
@@ -27,7 +26,7 @@ class ExtrairPublicacoes(Tool):
     def __init__(self):
         super().__init__(["application/pdf"])
 
-    async def executar(self, arquivo, client):
+    async def executar(self, arquivo):
         conteudo = await arquivo.read()
         file_stream = io.BytesIO(conteudo)
         leitor = PyPDF2.PdfReader(file_stream)
@@ -45,7 +44,7 @@ class ExtrairImagensPDF(Tool):
     def __init__(self):
         super().__init__(["application/pdf"])
 
-    async def executar(self, arquivo, client):
+    async def executar(self, arquivo):
         pdf_bytes = await arquivo.read()
         pdf_file = fitz.open(stream=pdf_bytes, filetype="pdf")
 
@@ -70,7 +69,7 @@ class DigitalizarPDF(Tool):
     def __init__(self):
         super().__init__(["application/pdf"])
 
-    async def executar(self, arquivo, client):
+    async def executar(self, arquivo):
         pdf_bytes = await arquivo.read()
         imagens_paginas = convert_from_bytes(pdf_bytes)
 
@@ -84,7 +83,7 @@ class DigitalizarPDF(Tool):
             imagem = Image.open(io.BytesIO(img_byte_arr))
             imagens.append(imagem)
         return imagens
-    
+
 
 class ToolMapper:
     @staticmethod

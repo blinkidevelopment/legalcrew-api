@@ -1,5 +1,5 @@
 import io
-from fastapi import APIRouter, UploadFile, File, Form, Depends
+from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 from typing_extensions import Optional
@@ -50,23 +50,34 @@ async def executar(
         usuario: Usuario = Depends(obter_usuario_logado)
 ):
     if usuario is not None:
+        id_arquivos = []
         assistente_bd = db.query(Assistente).filter_by(slug=nome).first()
 
         if assistente_bd is not None:
             nomes_ferramentas = [tool.nome for tool in assistente_bd.ferramentas]
             ferramentas = ToolMapper.mapear_ferramentas(nomes_ferramentas)
-
             assistente = Assistant(nome=assistente_bd.nome, id=assistente_bd.id, tools=ferramentas)
-            assistente.adicionar_mensagens([mensagem], None)
 
             if arquivos is not None:
-                assistente.adicionar_arquivos(arquivos)
-                await assistente.processar_arquivos(None)
-
+                if len(assistente.tools) > 0:
+                    assistente.adicionar_mensagens([mensagem], [], None)
+                    assistente.adicionar_arquivos(arquivos)
+                    id_arquivos = await assistente.processar_arquivos(None)
+                else:
+                    id_arquivos = await assistente.subir_arquivos([arquivos])
+                    assistente.adicionar_mensagens([mensagem], id_arquivos, None)
+            else:
+                assistente.adicionar_mensagens([mensagem], [], None)
             resultado, thread_id = assistente.criar_rodar_thread()
 
             conversa = Conversa(id_assistente=assistente.id, id_thread=thread_id, id_usuario=usuario.id)
             db.add(conversa)
+            db.flush()
+
+            for id_arquivo in id_arquivos:
+                arquivo_bd = Arquivo(id=id_arquivo, id_conversa=conversa.id)
+                db.add(arquivo_bd)
+
             db.commit()
             db.refresh(conversa)
             return {"thread_id": thread_id}
@@ -80,23 +91,38 @@ async def enviar_mensagem(
         assistente: str = Form(...),
         mensagem: str = Form(...),
         arquivos: Optional[UploadFile] = File(None),
-        db: Session = Depends(obter_sessao)
+        db: Session = Depends(obter_sessao),
+        usuario: Usuario = Depends(obter_usuario_logado)
 ):
     if thread_id:
-        assistente_bd = db.query(Assistente).filter_by(slug=assistente).first()
+        conversa = db.query(Conversa).filter_by(id_thread=thread_id, id_usuario=usuario.id).first()
 
-        if assistente_bd is not None:
-            nomes_ferramentas = [tool.nome for tool in assistente_bd.ferramentas]
-            ferramentas = ToolMapper.mapear_ferramentas(nomes_ferramentas)
-            assistente = Assistant(nome=assistente_bd.nome, id=assistente_bd.id, tools=ferramentas)
-            assistente.adicionar_mensagens([mensagem], thread_id)
+        if conversa is not None:
+            assistente_bd = db.query(Assistente).filter_by(slug=assistente).first()
 
-            if arquivos is not None:
-                assistente.adicionar_arquivos(arquivos)
-                await assistente.processar_arquivos(thread_id)
-            return assistente.rodar_thread(thread_id)
+            if assistente_bd is not None:
+                nomes_ferramentas = [tool.nome for tool in assistente_bd.ferramentas]
+                ferramentas = ToolMapper.mapear_ferramentas(nomes_ferramentas)
+                assistente = Assistant(nome=assistente_bd.nome, id=assistente_bd.id, tools=ferramentas)
 
-        return {"erro": "O assistente que você chamou não foi encontrado"}
+                if arquivos is not None:
+                    if len(assistente.tools) > 0:
+                        assistente.adicionar_mensagens([mensagem], [], thread_id)
+                        assistente.adicionar_arquivos(arquivos)
+                        id_arquivos = await assistente.processar_arquivos(thread_id)
+                    else:
+                        id_arquivos = await assistente.subir_arquivos([arquivos])
+                        assistente.adicionar_mensagens([mensagem], id_arquivos, thread_id)
+
+                    for id_arquivo in id_arquivos:
+                        arquivo_bd = Arquivo(id=id_arquivo, id_conversa=conversa.id)
+                        db.add(arquivo_bd)
+                    db.commit()
+                else:
+                    assistente.adicionar_mensagens([mensagem], [], thread_id)
+                return assistente.rodar_thread(thread_id)
+            return {"erro": "O assistente que você chamou não foi encontrado"}
+        return {"erro": "A conversa não foi encontrada"}
     return {"erro": "ID da thread em branco"}
 
 
@@ -115,6 +141,7 @@ async def listar_mensagens(
     return {"erro": "Conversa não localizada"}
 
 
+'''Rota para baixar o arquivo de uma thread'''
 @router.get("/thread/{thread_id}/arquivo/{file_id}")
 async def baixar_arquivo(
         thread_id: str,
@@ -129,10 +156,14 @@ async def baixar_arquivo(
 
         if arquivo is not None:
             assistente = Assistant(nome=conversa.assistente.nome, id=conversa.assistente.id, tools=[])
-            conteudo = assistente.obter_arquivo(file_id)
-            return StreamingResponse(
-                io.BytesIO(conteudo.content),
-                media_type="application/octet-stream",
-                headers={"Content-Disposition": f"attachment; filename={file_id}.png"}
-            )
+
+            try:
+                conteudo = assistente.obter_arquivo(file_id)
+                return StreamingResponse(
+                    io.BytesIO(conteudo.content),
+                    media_type="application/octet-stream",
+                    headers={"Content-Disposition": f"attachment; filename={file_id}.png"}
+                )
+            except:
+                raise HTTPException(status_code=403, detail="Você não tem permissão para baixar esse arquivo")
     return {"erro": "Não foi possível encontrar o arquivo"}

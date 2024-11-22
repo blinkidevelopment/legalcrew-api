@@ -22,35 +22,37 @@ class Assistant:
             "audio/m4a": "m4a"
         }
 
-    def adicionar_mensagens(self, mensagens: list, thread_id: str | None):
+    def adicionar_mensagens(self, mensagens: list, id_arquivos: list, thread_id: str | None):
         for mensagem in mensagens:
-            if thread_id is None:
-                self.mensagens.append(
+            mensagem_base = {
+                "role": "user",
+                "content": [
                     {
-                        "role": "user",
-                        "content": [
+                        "type": "text",
+                        "text": mensagem
+                    }
+                ]
+            }
+
+            if len(id_arquivos) > 0:
+                mensagem_base["attachments"] = [
+                    {
+                        "file_id": arquivo,
+                        "tools": [
                             {
-                                "type": "text",
-                                "text": mensagem
+                                "type": "file_search"
                             }
                         ]
-                    }
-                )
+                    } for arquivo in id_arquivos
+                ]
+
+            if thread_id is None:
+                self.mensagens.append(mensagem_base)
             else:
                 self.client.beta.threads.messages.create(
                     thread_id=thread_id,
-                    role="user",
-                    content=mensagem
+                    **mensagem_base
                 )
-
-    def adicionar_mensagem_thread(self, thread_id: str, mensagem: str):
-        thread_msg = self.client.beta.threads.messages.create(
-            thread_id=thread_id,
-            role="user",
-            content=mensagem
-        )
-        return thread_msg
-
 
     def adicionar_imagens(self, id_imagens: list, thread_id: str | None):
         for imagem in id_imagens:
@@ -101,6 +103,23 @@ class Assistant:
             id_imagens.append(response.id)
         return id_imagens
 
+    async def subir_arquivos(self, arquivos: list):
+        id_arquivos = []
+
+        for i, arquivo in enumerate(arquivos):
+            conteudo = await arquivo.read()
+            pdf_bytes = io.BytesIO(conteudo)
+            pdf_bytes.seek(0)
+            pdf_bytes.name = f'arquivo_{i+1}.pdf'
+
+            response = self.client.files.create(
+                file=pdf_bytes,
+                purpose="assistants"
+            )
+
+            id_arquivos.append(response.id)
+        return id_arquivos
+
     async def transcrever_audio(self, audio: UploadFile, thread_id: str | None):
         if audio.content_type in self.extensoes_audio:
             conteudo = await audio.read()
@@ -115,7 +134,7 @@ class Assistant:
                     file=audio_bytes
                 )
 
-                return self.adicionar_mensagens([f"**Transcrição**: {transcricao.text}"], thread_id)
+                return self.adicionar_mensagens([f"**Transcrição**: {transcricao.text}"], [], thread_id)
             except Exception as e:
                 raise ValueError(f"Erro ao transcrever áudio: {str(e)}")
         else:
@@ -129,27 +148,31 @@ class Assistant:
         self.arquivos.append(arquivo)
 
     async def processar_arquivos(self, thread_id: str | None):
+        id_arquivos = []
+
         if len(self.arquivos) > 0:
             for arquivo in self.arquivos:
                 if arquivo.content_type.startswith("audio/"):
                     await self.transcrever_audio(arquivo, thread_id)
                 else:
                     for ferramenta in self.tools:
-                        #TODO: ver casos em que há mais de uma ferramenta que aceita o mesmo tipo de arquivo
+                        # TODO: ver casos em que há mais de uma ferramenta que aceita o mesmo tipo de arquivo
                         try:
                             if await ferramenta.verificar_arquivo(arquivo):
-                                dados = await ferramenta.executar(arquivo, self.client)
+                                dados = await ferramenta.executar(arquivo)
                             else:
                                 break
                         except:
                             break
                         if isinstance(ferramenta, ExtrairPublicacoes):
-                            self.adicionar_mensagens(dados, thread_id)
+                            self.adicionar_mensagens(dados, [], thread_id)
+                            id_arquivos = []
                         else:
                             id_imagens = self.subir_imagens(dados)
                             self.adicionar_imagens(id_imagens, thread_id)
-                            #TODO: cadastrar arquivos no banco de dados
+                            id_arquivos = id_imagens
                         break
+        return id_arquivos
 
     def criar_rodar_thread(self):
         run = self.client.beta.threads.create_and_run(
@@ -195,11 +218,9 @@ class Assistant:
         mensagens = self.client.beta.threads.messages.list(thread_id)
         return mensagens
 
-    def obter_nome_assistente(self):
-        assistant = self.client.beta.assistants.retrieve(self.id)
-        if assistant:
-            return assistant.name
-
     def obter_arquivo(self, file_id: str):
-        conteudo = self.client.files.content(file_id)
-        return conteudo
+        try:
+            conteudo = self.client.files.content(file_id)
+            return conteudo
+        except:
+            raise ValueError("Não foi possível baixar o arquivo")
