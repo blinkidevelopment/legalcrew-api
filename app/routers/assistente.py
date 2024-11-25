@@ -1,4 +1,6 @@
 import io
+from typing import List
+
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
@@ -45,7 +47,7 @@ async def obter_nome_assistente(assistant_id: str, db: Session = Depends(obter_s
 async def executar(
         nome: str,
         mensagem: str = Form(...),
-        arquivos: Optional[UploadFile] = File(None),
+        arquivos: List[UploadFile] = File(None),
         db: Session = Depends(obter_sessao),
         usuario: Usuario = Depends(obter_usuario_logado)
 ):
@@ -68,7 +70,7 @@ async def executar(
                     assistente.adicionar_mensagens([mensagem], id_arquivos, None)
             else:
                 assistente.adicionar_mensagens([mensagem], [], None)
-            resultado, thread_id = assistente.criar_rodar_thread()
+            thread_id = assistente.criar_rodar_thread()
 
             conversa = Conversa(id_assistente=assistente.id, id_thread=thread_id, id_usuario=usuario.id)
             db.add(conversa)
@@ -90,7 +92,7 @@ async def enviar_mensagem(
         thread_id: str,
         assistente: str = Form(...),
         mensagem: str = Form(...),
-        arquivos: Optional[UploadFile] = File(None),
+        arquivos: List[UploadFile] = File(None),
         db: Session = Depends(obter_sessao),
         usuario: Usuario = Depends(obter_usuario_logado)
 ):

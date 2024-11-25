@@ -1,4 +1,6 @@
 import io
+from typing import List
+
 from fastapi import UploadFile
 from openai import OpenAI
 import os
@@ -144,8 +146,9 @@ class Assistant:
         for imagem in id_imagens:
             self.client.files.delete(imagem)
 
-    def adicionar_arquivos(self, arquivo: UploadFile):
-        self.arquivos.append(arquivo)
+    def adicionar_arquivos(self, arquivos: List[UploadFile]):
+        for arquivo in arquivos:
+            self.arquivos.append(arquivo)
 
     async def processar_arquivos(self, thread_id: str | None):
         id_arquivos = []
@@ -189,11 +192,11 @@ class Assistant:
             )
             time.sleep(2)
 
-        resultado = self.client.beta.threads.messages.list(
+        self.client.beta.threads.messages.list(
             thread_id=run.thread_id
         )
 
-        return resultado, run.thread_id
+        return run.thread_id
 
     def rodar_thread(self, thread_id: str):
         run = self.client.beta.threads.runs.create(
