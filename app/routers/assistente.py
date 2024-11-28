@@ -66,7 +66,7 @@ async def executar(
                     assistente.adicionar_arquivos(arquivos)
                     id_arquivos = await assistente.processar_arquivos(None)
                 else:
-                    id_arquivos = await assistente.subir_arquivos([arquivos])
+                    id_arquivos = await assistente.subir_arquivos(arquivos)
                     assistente.adicionar_mensagens([mensagem], id_arquivos, None)
             else:
                 assistente.adicionar_mensagens([mensagem], [], None)
@@ -113,7 +113,7 @@ async def enviar_mensagem(
                         assistente.adicionar_arquivos(arquivos)
                         id_arquivos = await assistente.processar_arquivos(thread_id)
                     else:
-                        id_arquivos = await assistente.subir_arquivos([arquivos])
+                        id_arquivos = await assistente.subir_arquivos(arquivos)
                         assistente.adicionar_mensagens([mensagem], id_arquivos, thread_id)
 
                     for id_arquivo in id_arquivos:
